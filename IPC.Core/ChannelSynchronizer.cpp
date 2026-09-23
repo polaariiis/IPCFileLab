@@ -16,12 +16,17 @@ ChannelSynchronizer::~ChannelSynchronizer()
 		CloseHandle(static_cast<HANDLE>(handle_));
 }
 
-void ChannelSynchronizer::lock()
+bool ChannelSynchronizer::lock()
 {
 	const DWORD result = WaitForSingleObject(static_cast<HANDLE>(handle_), INFINITE);
 
-	if (result != WAIT_OBJECT_0 && result != WAIT_ABANDONED)
-		throw std::runtime_error("Failed to acquire mutex");
+	if (result == WAIT_OBJECT_0)
+		return false;
+
+	if (result == WAIT_ABANDONED)
+		return true;
+
+	throw std::runtime_error("Failed to acquire mutex");
 }
 
 void ChannelSynchronizer::unlock()

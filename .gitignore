@@ -1,6 +1,6 @@
 .vs/
 build/
-build-cmake/
+build-cmake*/
 Debug/
 Release/
 x64/

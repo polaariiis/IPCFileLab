@@ -10,7 +10,7 @@ public:
 	ChannelSynchronizer(const ChannelSynchronizer&) = delete;
 	ChannelSynchronizer& operator=(const ChannelSynchronizer&) = delete;
 
-	void lock();
+	bool lock();
 	void unlock();
 private:
 	void* handle_;

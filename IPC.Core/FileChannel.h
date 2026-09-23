@@ -21,6 +21,7 @@ private:
 	ChannelNotifier spaceNotifier_;
 
 	void initialize();
+	void recover();
 	ChannelState getState() const;
 	void setState(ChannelState state);
 };

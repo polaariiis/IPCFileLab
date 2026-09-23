@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
+#include <functional>
 #include <stdexcept>
 #include <vector>
 
@@ -18,13 +19,43 @@ namespace
 	constexpr std::size_t StateSize = sizeof(std::uint8_t);
 	constexpr std::size_t PayloadSizeFieldSize = sizeof(std::uint32_t);
 	constexpr std::size_t HeaderSize = StateSize + PayloadSizeFieldSize;
+	constexpr std::size_t MaxPayloadSize = 16 * 1024 * 1024;
+
+	std::string createName(const char* prefix, const std::string& path)
+	{
+		return std::string(prefix) + std::to_string(std::hash<std::string>{}(path));
+	}
+
+	void writeEmpty(const std::string& path)
+	{
+		std::vector<std::byte> data(HeaderSize);
+		const auto rawState = static_cast<std::uint8_t>(ChannelState::Empty);
+		const std::uint32_t payloadSize{};
+
+		std::memcpy(data.data(), &rawState, StateSize);
+		std::memcpy(data.data() + StateSize, &payloadSize, PayloadSizeFieldSize);
+
+		FileStorage::write(path, data);
+	}
+
+	bool isValidTransition(ChannelState current, ChannelState next)
+	{
+		return (current == ChannelState::Writing && next == ChannelState::Ready)
+			|| (current == ChannelState::Ready && next == ChannelState::Reading)
+			|| (current == ChannelState::Reading && next == ChannelState::Empty);
+	}
+
+	bool isRecoverableState(ChannelState state)
+	{
+		return state == ChannelState::Writing || state == ChannelState::Reading;
+	}
 }
 
 FileChannel::FileChannel(const std::string& path)
-	: path_(path),
-	synchronizer_("IPCFileLabMutex"),
-	dataNotifier_("IPCFileLabDataEvent"),
-	spaceNotifier_("IPCFileLabSpaceEvent")
+	: path_(std::filesystem::absolute(path).lexically_normal().string()),
+	synchronizer_(createName("IPCFileLabMutex", path_).c_str()),
+	dataNotifier_(createName("IPCFileLabDataEvent", path_).c_str()),
+	spaceNotifier_(createName("IPCFileLabSpaceEvent", path_).c_str())
 {
 	initialize();
 }
@@ -36,15 +67,13 @@ void FileChannel::initialize()
 	try
 	{
 		if (!std::filesystem::exists(path_))
+			writeEmpty(path_);
+		else
 		{
-			std::vector<std::byte> data(HeaderSize);
-			const auto rawState = static_cast<std::uint8_t>(ChannelState::Empty);
-			const std::uint32_t payloadSize{};
+			const auto state = getState();
 
-			std::memcpy(data.data(), &rawState, StateSize);
-			std::memcpy(data.data() + StateSize, &payloadSize, PayloadSizeFieldSize);
-
-			FileStorage::write(path_, data);
+			if (isRecoverableState(state))
+				recover();
 		}
 
 		synchronizer_.unlock();
@@ -56,20 +85,35 @@ void FileChannel::initialize()
 	}
 }
 
+void FileChannel::recover()
+{
+	writeEmpty(path_);
+}
+
 void FileChannel::send(const Message& message)
 {
 	while (true)
 	{
-		synchronizer_.lock();
+		const bool abandoned = synchronizer_.lock();
 
 		try
 		{
 			const auto state = getState();
+
+			if (isRecoverableState(state))
+			{
+				if (!abandoned)
+					throw std::runtime_error("IPC data has stale channel state");
+
+				recover();
+			}
+
+			const auto currentState = getState();
 			std::cout << "Sender state: "
-				<< static_cast<int>(state)
+				<< static_cast<int>(currentState)
 				<< '\n';
 
-			if (state != ChannelState::Empty)
+			if (currentState != ChannelState::Empty)
 			{
 				synchronizer_.unlock();
 			}
@@ -77,7 +121,7 @@ void FileChannel::send(const Message& message)
 			{
 				const auto payload = Serializer::serialize(message);
 
-				if (payload.size() > static_cast<std::size_t>(UINT32_MAX))
+				if (payload.size() > MaxPayloadSize)
 					throw std::runtime_error("Message is too large");
 
 				ChannelHeader header;
@@ -90,7 +134,8 @@ void FileChannel::send(const Message& message)
 
 				std::memcpy(data.data(), &rawState, StateSize);
 				std::memcpy(data.data() + StateSize, &header.payloadSize, PayloadSizeFieldSize);
-				std::memcpy(data.data() + HeaderSize, payload.data(), payload.size());
+				if (!payload.empty())
+					std::memcpy(data.data() + HeaderSize, payload.data(), payload.size());
 
 				FileStorage::write(path_, data);
 
@@ -116,10 +161,20 @@ Message FileChannel::recieve()
 {
 	while (true)
 	{
-		synchronizer_.lock();
+		const bool abandoned = synchronizer_.lock();
 
 		try
 		{
+			const auto state = getState();
+
+			if (isRecoverableState(state))
+			{
+				if (!abandoned)
+					throw std::runtime_error("IPC data has stale channel state");
+
+				recover();
+			}
+
 			const auto data = FileStorage::read(path_);
 
 			if (data.size() < HeaderSize)
@@ -131,12 +186,12 @@ Message FileChannel::recieve()
 			std::memcpy(&rawState, data.data(), StateSize);
 			std::memcpy(&payloadSize, data.data() + StateSize, PayloadSizeFieldSize);
 
-			const auto state = getState();
+			const auto currentState = getState();
 			std::cout << "Receiver state: "
 				<< static_cast<int>(rawState)
 				<< '\n';
 
-			if (state == ChannelState::Ready)
+			if (currentState == ChannelState::Ready)
 			{
 				if (data.size() != HeaderSize + payloadSize)
 					throw std::runtime_error("IPC data has invalid payload size");
@@ -145,7 +200,8 @@ Message FileChannel::recieve()
 
 				std::vector<std::byte> payload(payloadSize);
 
-				std::memcpy(payload.data(), data.data() + HeaderSize, payloadSize);
+				if (!payload.empty())
+					std::memcpy(payload.data(), data.data() + HeaderSize, payloadSize);
 
 				Message message = Serializer::deserialize(payload);
 
@@ -180,12 +236,23 @@ ChannelState FileChannel::getState() const
 
 	std::memcpy(&rawState, data.data(), StateSize);
 
+	std::uint32_t payloadSize{};
+
+	std::memcpy(&payloadSize, data.data() + StateSize, PayloadSizeFieldSize);
+
 	switch (rawState)
 	{
 	case static_cast<std::uint8_t>(ChannelState::Empty):
+		if (payloadSize != 0 || data.size() != HeaderSize)
+			throw std::runtime_error("IPC data has invalid empty channel size");
+
+		return ChannelState::Empty;
 	case static_cast<std::uint8_t>(ChannelState::Writing):
 	case static_cast<std::uint8_t>(ChannelState::Ready):
 	case static_cast<std::uint8_t>(ChannelState::Reading):
+		if (payloadSize > MaxPayloadSize || data.size() != HeaderSize + payloadSize)
+			throw std::runtime_error("IPC data has invalid payload size");
+
 		return static_cast<ChannelState>(rawState);
 	default:
 		throw std::runtime_error("IPC data has invalid channel state");
@@ -194,6 +261,17 @@ ChannelState FileChannel::getState() const
 
 void FileChannel::setState(ChannelState state)
 {
+	const auto current = getState();
+
+	if (!isValidTransition(current, state))
+		throw std::runtime_error("IPC data has invalid channel state transition");
+
+	if (state == ChannelState::Empty)
+	{
+		writeEmpty(path_);
+		return;
+	}
+
 	auto data = FileStorage::read(path_);
 
 	if (data.size() < HeaderSize)

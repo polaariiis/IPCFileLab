@@ -31,3 +31,25 @@ add_executable(IPC.Receiver
 )
 
 target_link_libraries(IPC.Receiver PRIVATE IPC.Core)
+
+include(FetchContent)
+
+FetchContent_Declare(
+	googletest
+	URL https://github.com/google/googletest/archive/refs/tags/v1.15.2.zip
+	DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+)
+
+set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(googletest)
+
+enable_testing()
+
+add_executable(IPC.Tests
+	Tests/IPC.Tests.cpp
+)
+
+target_link_libraries(IPC.Tests PRIVATE IPC.Core GTest::gtest_main)
+
+include(GoogleTest)
+gtest_discover_tests(IPC.Tests)
