@@ -187,3 +187,7 @@ A round trip is four file replacements, so the file system dominates (the 64 KiB
 - The channel file and its side files are accessible to the same user; there is no authentication of peers.
 - The C++ and C versions use the same file format but different lock names, so they must not use one channel at the same time.
 - The console programs send or receive one message per invocation.
+
+## License
+
+IPCFileLab is released under the MIT License; see [LICENSE](LICENSE).
