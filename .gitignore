@@ -20,3 +20,5 @@ x64/
 *.vcxproj.user
 ipc.dat
 *.tmp
+ipc.dat.lock
+ipc.dat.*.fifo
