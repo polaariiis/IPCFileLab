@@ -356,6 +356,21 @@ TEST_F(FileTest, StaleStateWithoutAbandonedLockFollowsThePlatformRule)
 #endif
 }
 
+// Paths are UTF-8 on every platform: letters of several scripts that no single Windows
+// code page holds.
+TEST_F(FileTest, ChannelWorksWithUnicodePath)
+{
+    const auto directory = directory_ / std::filesystem::u8path(u8"ümläut-Кириллица-😀");
+    std::filesystem::create_directories(directory);
+    const std::string path = (directory / "ipc.dat").u8string();
+
+    Channel channel(path);
+    ASSERT_NE(channel.handle, nullptr);
+    ASSERT_EQ(channel.send("unicode"), IPC_OK);
+    EXPECT_EQ(channel.receive(), "unicode");
+    EXPECT_TRUE(std::filesystem::exists(directory / "ipc.dat"));
+}
+
 // ---------------------------------------------------------------- messages and limits
 
 TEST_F(FileTest, ChannelSendsAndReceivesEmptyMessage)

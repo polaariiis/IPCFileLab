@@ -44,26 +44,65 @@ static void object_name(char *name, size_t size, const char *prefix, const char 
     snprintf(name, size, "%s%016llx", prefix, (unsigned long long)hash_path(path));
 }
 
-ipc_status platform_absolute_path(const char *path, char **absolute)
+wchar_t *platform_wide_path(const char *path)
 {
-    const DWORD needed = GetFullPathNameA(path, 0, NULL, NULL);
-    char *buffer;
+    const int length = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, NULL, 0);
+    wchar_t *wide;
 
-    if (needed == 0)
-        return IPC_IO_ERROR;
+    if (length <= 0)
+        return NULL;
 
-    buffer = malloc(needed);
-    if (buffer == NULL)
-        return IPC_OUT_OF_MEMORY;
-
-    if (GetFullPathNameA(path, needed, buffer, NULL) == 0)
+    wide = malloc((size_t)length * sizeof *wide);
+    if (wide != NULL && MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, wide, length) != length)
     {
-        free(buffer);
-        return IPC_IO_ERROR;
+        free(wide);
+        wide = NULL;
     }
 
-    *absolute = buffer;
-    return IPC_OK;
+    return wide;
+}
+
+/* `wide` as a malloc'ed UTF-8 string; NULL on failure. */
+static char *utf8_path(const wchar_t *wide)
+{
+    const int length = WideCharToMultiByte(CP_UTF8, 0, wide, -1, NULL, 0, NULL, NULL);
+    char *path;
+
+    if (length <= 0)
+        return NULL;
+
+    path = malloc((size_t)length);
+    if (path != NULL && WideCharToMultiByte(CP_UTF8, 0, wide, -1, path, length, NULL, NULL) != length)
+    {
+        free(path);
+        path = NULL;
+    }
+
+    return path;
+}
+
+ipc_status platform_absolute_path(const char *path, char **absolute)
+{
+    wchar_t *wide = platform_wide_path(path);
+    wchar_t *full = NULL;
+    DWORD needed;
+    ipc_status status = IPC_IO_ERROR;
+
+    if (wide == NULL)
+        return IPC_INVALID_ARGUMENT; /* not UTF-8 */
+
+    needed = GetFullPathNameW(wide, 0, NULL, NULL);
+    if (needed > 0)
+        full = malloc(needed * sizeof *full);
+    if (full != NULL && GetFullPathNameW(wide, needed, full, NULL) > 0)
+    {
+        *absolute = utf8_path(full);
+        status = *absolute != NULL ? IPC_OK : IPC_OUT_OF_MEMORY;
+    }
+
+    free(full);
+    free(wide);
+    return status;
 }
 
 ipc_status platform_lock_open(const char *path, platform_lock **lock)

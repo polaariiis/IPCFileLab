@@ -42,9 +42,9 @@ typedef enum ipc_status
 typedef struct ipc_channel ipc_channel;
 
 /*
- * Opens the channel stored in the file at `path`, creating it as EMPTY when it does not
- * exist. A stale WRITING or READING state is reset to EMPTY; a READY message is kept.
- * On success *channel receives a handle to close with ipc_channel_close().
+ * Opens the channel stored in the file at `path` (UTF-8 on every platform), creating it as
+ * EMPTY when it does not exist. A stale WRITING or READING state is reset to EMPTY; a READY
+ * message is kept. On success *channel receives a handle to close with ipc_channel_close().
  */
 ipc_status ipc_channel_open(const char *path, ipc_channel **channel);
 

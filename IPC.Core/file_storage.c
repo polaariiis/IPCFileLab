@@ -18,11 +18,32 @@
 
 /* ------------------------------------------------------------------ helpers */
 
+#ifdef _WIN32
+#include "platform.h" /* platform_wide_path: paths are UTF-8, Windows wants UTF-16 */
+#endif
+
+/* Opens `path` (UTF-8) in binary mode for reading ("rb") or writing ("wb"). */
+static FILE *open_file(const char *path, int writing)
+{
+#ifdef _WIN32
+    wchar_t *wide = platform_wide_path(path);
+    FILE *file;
+
+    if (wide == NULL)
+        return NULL;
+    file = _wfopen(wide, writing ? L"wb" : L"rb");
+    free(wide);
+    return file;
+#else
+    return fopen(path, writing ? "wb" : "rb");
+#endif
+}
+
 /* Opens `path` for binary reading and reports its size. */
 static ipc_status open_for_reading(const char *path, FILE **file, size_t *file_size)
 {
     long end;
-    FILE *opened = fopen(path, "rb");
+    FILE *opened = open_file(path, 0);
 
     if (opened == NULL)
         return IPC_IO_ERROR;
@@ -40,11 +61,12 @@ static ipc_status open_for_reading(const char *path, FILE **file, size_t *file_s
 
 #ifdef _WIN32
 
-static ipc_status write_temporary(const char *path, const void *data, size_t size, char *temporary)
+/* Writes `data` to a new temporary file next to `path`; its name goes to `temporary`. */
+static ipc_status write_temporary(const wchar_t *path, const void *data, size_t size, wchar_t *temporary)
 {
-    char directory[MAX_PATH];
-    const char *slash = strrchr(path, '\\');
-    const char *forward = strrchr(path, '/');
+    wchar_t directory[MAX_PATH];
+    const wchar_t *slash = wcsrchr(path, L'\\');
+    const wchar_t *forward = wcsrchr(path, L'/');
     FILE *file;
     size_t length;
 
@@ -52,37 +74,37 @@ static ipc_status write_temporary(const char *path, const void *data, size_t siz
         slash = forward;
 
     length = slash != NULL ? (size_t)(slash - path) : 0;
-    if (length >= sizeof directory)
+    if (length >= MAX_PATH)
         return IPC_IO_ERROR;
 
     if (length == 0)
-        strcpy(directory, ".");
+        wcscpy(directory, L".");
     else
     {
-        memcpy(directory, path, length);
-        directory[length] = '\0';
+        wmemcpy(directory, path, length);
+        directory[length] = L'\0';
     }
 
-    if (GetTempFileNameA(directory, "ipc", 0, temporary) == 0)
+    if (GetTempFileNameW(directory, L"ipc", 0, temporary) == 0)
         return IPC_IO_ERROR;
 
-    file = fopen(temporary, "wb");
+    file = _wfopen(temporary, L"wb");
     if (file == NULL)
     {
-        DeleteFileA(temporary);
+        DeleteFileW(temporary);
         return IPC_IO_ERROR;
     }
 
     if ((size > 0 && fwrite(data, 1, size, file) != size) || fflush(file) != 0)
     {
         fclose(file);
-        DeleteFileA(temporary);
+        DeleteFileW(temporary);
         return IPC_IO_ERROR;
     }
 
     if (fclose(file) != 0)
     {
-        DeleteFileA(temporary);
+        DeleteFileW(temporary);
         return IPC_IO_ERROR;
     }
 
@@ -91,24 +113,34 @@ static ipc_status write_temporary(const char *path, const void *data, size_t siz
 
 int file_storage_exists(const char *path)
 {
-    return GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES;
+    wchar_t *wide = platform_wide_path(path);
+    int exists;
+
+    if (wide == NULL)
+        return 0;
+    exists = GetFileAttributesW(wide) != INVALID_FILE_ATTRIBUTES;
+    free(wide);
+    return exists;
 }
 
 ipc_status file_storage_write(const char *path, const void *data, size_t size)
 {
-    char temporary[MAX_PATH];
-    const ipc_status status = write_temporary(path, data, size, temporary);
+    wchar_t temporary[MAX_PATH];
+    wchar_t *wide = platform_wide_path(path);
+    ipc_status status;
 
-    if (status != IPC_OK)
-        return status;
-
-    if (!MoveFileExA(temporary, path, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
-    {
-        DeleteFileA(temporary);
+    if (wide == NULL)
         return IPC_IO_ERROR;
+
+    status = write_temporary(wide, data, size, temporary);
+    if (status == IPC_OK && !MoveFileExW(temporary, wide, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+    {
+        DeleteFileW(temporary);
+        status = IPC_IO_ERROR;
     }
 
-    return IPC_OK;
+    free(wide);
+    return status;
 }
 
 #else

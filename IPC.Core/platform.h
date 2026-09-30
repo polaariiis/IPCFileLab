@@ -46,6 +46,13 @@ ipc_status platform_notifier_wait(platform_notifier *notifier, int timeout_ms);
 /* Milliseconds of a monotonic clock, for timeouts. */
 long long platform_now_ms(void);
 
+#ifdef _WIN32
+#include <wchar.h>
+
+/* `path` (UTF-8) as a malloc'ed UTF-16 string for the Windows file APIs; NULL on failure. */
+wchar_t *platform_wide_path(const char *path);
+#endif
+
 #ifdef __cplusplus
 }
 #endif
