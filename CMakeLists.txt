@@ -92,6 +92,11 @@ if(IPC_BUILD_TESTS)
 	endif()
 	ipc_warnings(IPC.TestHelper)
 
+	# Timing of round trips per message size (not run by CTest).
+	add_executable(IPC.Benchmark Tests/ipc_benchmark.c)
+	target_link_libraries(IPC.Benchmark PRIVATE IPC.Core)
+	ipc_warnings(IPC.Benchmark)
+
 	add_executable(IPC.Tests Tests/IPC.Tests.cpp)
 	target_link_libraries(IPC.Tests PRIVATE IPC.Core GTest::gtest_main)
 	target_compile_definitions(IPC.Tests PRIVATE
