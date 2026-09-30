@@ -277,8 +277,7 @@ static ipc_status take(ipc_channel *channel, void **data, size_t *size)
         status = protocol_decode_header(file, file_size, &header);
     if (status == IPC_OK && header.state != CHANNEL_READY)
         status = IPC_PROTOCOL_ERROR;
-    if (status == IPC_OK)
-        status = set_state(channel->path, file, file_size, CHANNEL_READY, CHANNEL_READING);
+    /* The copy is made before the state changes, so a failure leaves the message READY. */
     if (status == IPC_OK && header.payload_size > 0)
     {
         payload = malloc(header.payload_size);
@@ -287,6 +286,8 @@ static ipc_status take(ipc_channel *channel, void **data, size_t *size)
         else
             memcpy(payload, file + CHANNEL_HEADER_SIZE, header.payload_size);
     }
+    if (status == IPC_OK)
+        status = set_state(channel->path, file, file_size, CHANNEL_READY, CHANNEL_READING);
     if (status == IPC_OK)
         status = set_state(channel->path, file, file_size, CHANNEL_READING, CHANNEL_EMPTY);
     if (status == IPC_OK)

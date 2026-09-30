@@ -179,6 +179,8 @@ A round trip is four file replacements, so the file system dominates (the 64 KiB
 
 - The channel provides at-most-once delivery. A process crash during `READING` discards that in-flight message during recovery.
 - One slot: a sender waits while a message is unread. There is no queue.
+- Timeouts bound the wait for the channel's state, not the wait for the lock itself: a process that hangs (without dying) while holding the lock blocks the others. Every operation holds the lock only for a few file writes.
+- If writing the channel file fails midway on Windows (a disk error, not a crash), the channel can stay in `READING`; since no mutex was abandoned, operations then report `IPC_PROTOCOL_ERROR` until the channel is reopened, which resets it.
 - Payloads are raw bytes of at most 16 MiB; there is no message schema or versioning.
 - Every message is written three times (as `WRITING`, `READY` and `READING`) through temporary files, trading speed for crash safety. It suits occasional messages, not high-throughput streams.
 - Paths are UTF-8 on every platform (Windows converts them for its wide-character APIs). On Windows the channel's directory is limited to `MAX_PATH` (260 characters), because temporary files are created with `GetTempFileNameW`.
