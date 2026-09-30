@@ -70,7 +70,8 @@ The layers stay the same: channel → storage / protocol / platform.
 | Stale `WRITING`/`READING` seen under the lock | Recovered if the mutex was abandoned, else `IPC_PROTOCOL_ERROR` (as before) | Recovered: under the lock these states only remain when the previous holder died | `flock` cannot report abandonment |
 | Notification | Named auto-reset events (as before) | A FIFO per event (`<channel>.data.fifo`, `<channel>.space.fifo`): notify writes a byte, wait `poll`s and reads one | No named events on POSIX; `sem_timedwait` is missing on macOS |
 | Object names | `IPCFileLabMutex…`, `…DataEvent…`, `…SpaceEvent…` + 64-bit FNV-1a of the full path | Files next to the channel | `std::hash` is not available in C and not stable across compilers |
-| File replacement | `GetTempFileNameA` + `MoveFileExA(REPLACE_EXISTING \| WRITE_THROUGH)` (as before) | `mkstemp` in the same directory + `fsync` + `rename` | Both replace the file as a whole for other processes |
+| File replacement | `GetTempFileNameW` + `MoveFileExW(REPLACE_EXISTING \| WRITE_THROUGH)` (as before, in the wide-character versions) | `mkstemp` in the same directory + `fsync` + `rename` | Both replace the file as a whole for other processes |
+| Paths | UTF-8, converted to UTF-16 for the wide-character APIs | UTF-8, passed through | The original's ANSI APIs fail for paths outside the system code page |
 | Byte order | The size is encoded little-endian explicitly — the same bytes the original wrote on x86/x64 | | No struct is written directly |
 
 ## Deliberate changes (each needed for portability or for StudyBoard)

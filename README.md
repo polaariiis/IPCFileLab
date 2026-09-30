@@ -105,7 +105,7 @@ Opening a channel creates a missing file as a valid empty header. It never reset
 
 Malformed data is reported as `IPC_CORRUPT_DATA` rather than waited on forever: missing or too-small files, invalid state bytes, an `EMPTY` state with a payload, payload sizes over 16 MiB, truncated payloads, and unexpected file sizes. The file size is checked before the file is read into memory.
 
-Every write goes to a temporary file in the same directory, which then replaces the channel file: `MoveFileExA(MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)` on Windows, `fsync()` and `rename()` on Linux and macOS. Under the lock, readers therefore see either the old complete file or the new complete file, never a half-written one.
+Every write goes to a temporary file in the same directory, which then replaces the channel file: `MoveFileExW(MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)` on Windows, `fsync()` and `rename()` on Linux and macOS. Under the lock, readers therefore see either the old complete file or the new complete file, never a half-written one.
 
 `WRITING` and `READING` are recoverable stale states: they are left only by a process that died in the middle of an operation. They are replaced by an empty header when a channel is opened, and when the lock is taken over from a process that died holding it. This discards a message that was not fully published (`WRITING`) or was in delivery (`READING`), so a partial payload is never delivered and no message is delivered twice. `READY` is always kept. Corrupted files are not repaired automatically.
 
@@ -171,7 +171,7 @@ The GoogleTest suite (40 tests) covers the header encoding and its validation; s
 | 16 bytes | 5.3 ms | 5.4 ms |
 | 64 KiB | 71 ms | 34 ms |
 | 1 MiB | 32 ms | 14 ms |
-| 16 MiB | 210 ms | 47–56 ms |
+| 16 MiB | 210 ms | 47â€“56 ms |
 
 A round trip is four file replacements, so the file system dominates (the 64 KiB case is consistently slower than 1 MiB on this machine in both versions). The C version checks the state from the 5-byte header instead of reading the whole file each time. A receive with a 100 ms timeout returns after about 110 ms. Linux and macOS were not benchmarked.
 
@@ -181,7 +181,7 @@ A round trip is four file replacements, so the file system dominates (the 64 KiB
 - One slot: a sender waits while a message is unread. There is no queue.
 - Payloads are raw bytes of at most 16 MiB; there is no message schema or versioning.
 - Every message is written three times (as `WRITING`, `READY` and `READING`) through temporary files, trading speed for crash safety. It suits occasional messages, not high-throughput streams.
-- Windows paths are limited to `MAX_PATH` (260 characters) by the ANSI file APIs.
+- Paths are UTF-8 on every platform (Windows converts them for its wide-character APIs). On Windows the channel's directory is limited to `MAX_PATH` (260 characters), because temporary files are created with `GetTempFileNameW`.
 - The channel file and its side files are accessible to the same user; there is no authentication of peers.
 - The C++ and C versions use the same file format but different lock names, so they must not use one channel at the same time.
 - The console programs send or receive one message per invocation.
